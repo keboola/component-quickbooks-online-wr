@@ -1,18 +1,34 @@
 {
   "type": "object",
-  "title": "extractor configuration",
+  "title": "QuickBooks",
   "required": [
-    "print_hello"
+    "endpoints"
   ],
   "properties": {
-    "print_hello": {
-      "type": "boolean",
-      "title": "Print Hello",
+    "companyid": {
+      "type": "string",
+      "title": "Company ID",
+      "default": "",
+      "minLength": 1,
+      "description": "Can be found under QuickBooks account's \"Account and Setting\". Does not contain any spaces.",
       "propertyOrder": 1
     },
-    "debug": {
-      "type": "boolean",
-      "title": "Debug",
+    "endpoints": {
+      "type": "array",
+      "title": "Endpoints",
+      "format": "select",
+      "items": {
+        "type": "string",
+        "enum": [
+          "journals",
+          "invoices"
+        ]
+      },
+      "uniqueItems": true,
+      "options": {
+        "tags": true
+      },
+      "description": "Select which endpoints you want to process.",
       "propertyOrder": 2
     }
   }
