@@ -69,7 +69,9 @@ class Component(ComponentBase):
             self.client.write_journal(entry_json)
 
     def process_invoices(self, reader: csv.DictReader):
-        pass
+        for row in reader:
+            entry_json = json.loads(row['entry'])
+            self.client.write_invoice(entry_json)
 
     def get_tokens(self, oauth):
 
