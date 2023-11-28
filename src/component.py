@@ -1,76 +1,99 @@
-"""
-Template Component main class.
-
-"""
 import csv
+import json
 import logging
-from datetime import datetime
+import datetime
 
 from keboola.component.base import ComponentBase
 from keboola.component.exceptions import UserException
 
+from client import QuickbooksClient
+
 # configuration variables
 KEY_API_TOKEN = '#api_token'
-KEY_PRINT_HELLO = 'print_hello'
+KEY_SANDBOX = 'sandbox'
+KEY_ENDPOINT = 'endpoint'
+KEY_COMPANY_ID = 'company_id'
 
 # list of mandatory parameters => if some is missing,
 # component will fail with readable message on initialization.
-REQUIRED_PARAMETERS = [KEY_PRINT_HELLO]
+REQUIRED_PARAMETERS = [KEY_COMPANY_ID, KEY_ENDPOINT]
 REQUIRED_IMAGE_PARS = []
 
 
 class Component(ComponentBase):
-    """
-        Extends base class for general Python components. Initializes the CommonInterface
-        and performs configuration validation.
-
-        For easier debugging the data folder is picked up by default from `../data` path,
-        relative to working directory.
-
-        If `debug` parameter is present in the `config.json`, the default logger is set to verbose DEBUG mode.
-    """
+    BASE_URL = "https://quickbooks.api.intuit.com"
 
     def __init__(self):
         super().__init__()
+        self.client: QuickbooksClient
+        self.refresh_token = None
+        self.access_token = None
 
     def run(self):
-        """
-        Main execution code
-        """
-
-        # ####### EXAMPLE TO REMOVE
-        # check for missing configuration parameters
         self.validate_configuration_parameters(REQUIRED_PARAMETERS)
-        self.validate_image_parameters(REQUIRED_IMAGE_PARS)
-        params = self.configuration.parameters
-        # Access parameters in data/config.json
-        if params.get(KEY_PRINT_HELLO):
-            logging.info("Hello World")
+        oauth = self.configuration.oauth_credentials
+        sandbox = self.configuration.parameters.get(KEY_SANDBOX, False)
+        company_id = self.configuration.parameters.get(KEY_COMPANY_ID)
+        endpoint = self.configuration.parameters.get(KEY_ENDPOINT)
 
-        # get last state data/in/state.json from previous run
-        previous_state = self.get_state_file()
-        logging.info(previous_state.get('some_state_parameter'))
+        self.refresh_token, self.access_token = self.get_tokens(oauth)
 
-        # Create output table (Tabledefinition - just metadata)
-        table = self.create_out_table_definition('output.csv', incremental=True, primary_key=['timestamp'])
+        in_tables = self.get_input_tables_definitions()
+        in_table = in_tables[0] if in_tables else None
 
-        # get file path of the table (data/out/tables/Features.csv)
-        out_table_path = table.full_path
-        logging.info(out_table_path)
+        if not in_table:
+            raise UserException("No input table found, exiting.")
 
-        # DO whatever and save into out_table_path
-        with open(table.full_path, mode='wt', encoding='utf-8', newline='') as out_file:
-            writer = csv.DictWriter(out_file, fieldnames=['timestamp'])
-            writer.writeheader()
-            writer.writerow({"timestamp": datetime.now().isoformat()})
+        self.client = QuickbooksClient(company_id, self.refresh_token, self.access_token, oauth, sandbox)
 
-        # Save table manifest (output.csv.manifest) from the tabledefinition
-        self.write_manifest(table)
+        with open(in_table.full_path, 'r') as f:
+            reader = csv.DictReader(f, delimiter=";")
 
-        # Write new state - will be available next run
-        self.write_state_file({"some_state_parameter": "value"})
+            if endpoint == "journals":
+                self.process_journals(reader)
+            elif endpoint == "invoices":
+                self.process_invoices(reader)
+            else:
+                raise UserException(f"Unsupported endpoint: {endpoint}")
 
-        # ####### EXAMPLE TO REMOVE END
+        self.write_state_file({
+            "tokens":
+                {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                 "#refresh_token": self.refresh_token,
+                 "#access_token": self.access_token}
+        })
+
+    def process_journals(self, reader: csv.DictReader):
+        for row in reader:
+            entry_json = json.loads(row['entry'])
+            self.client.write_journal(entry_json)
+
+    def process_invoices(self, reader: csv.DictReader):
+        pass
+
+    def get_tokens(self, oauth):
+
+        try:
+            refresh_token = oauth["data"]["refresh_token"]
+            access_token = oauth["data"]["access_token"]
+        except TypeError:
+            raise UserException("OAuth data is not available.")
+
+        statefile = self.get_state_file()
+        if statefile.get("tokens", {}).get("ts"):
+            ts_oauth = datetime.datetime.strptime(oauth["created"], "%Y-%m-%dT%H:%M:%S.%fZ")
+            ts_statefile = datetime.datetime.strptime(statefile["tokens"]["ts"], "%Y-%m-%dT%H:%M:%S.%fZ")
+
+            if ts_statefile > ts_oauth:
+                refresh_token = statefile["tokens"].get("#refresh_token")
+                access_token = statefile["tokens"].get("#access_token")
+                logging.debug("Loaded tokens from statefile.")
+            else:
+                logging.debug("Using tokens from oAuth.")
+        else:
+            logging.warning("No timestamp found in statefile. Using oAuth tokens.")
+
+        return refresh_token, access_token
 
 
 """
