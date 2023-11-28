@@ -50,9 +50,9 @@ class Component(ComponentBase):
             reader = csv.DictReader(f, delimiter=";")
 
             if endpoint == "journals":
-                self.process_journals(reader)
+                self.process_journals(client, reader)
             elif endpoint == "invoices":
-                self.process_invoices(reader)
+                self.process_invoices(client, reader)
             else:
                 raise UserException(f"Unsupported endpoint: {endpoint}")
 
@@ -62,15 +62,15 @@ class Component(ComponentBase):
                  "#refresh_token": client.refresh_token}
         })
 
-    def process_journals(self, reader: csv.DictReader):
+    def process_journals(self, client, reader: csv.DictReader):
         for row in reader:
             entry_json = json.loads(row['entry'])
-            self.client.write_journal(entry_json)
+            client.write_journal(entry_json)
 
-    def process_invoices(self, reader: csv.DictReader):
+    def process_invoices(self, client, reader: csv.DictReader):
         for row in reader:
             entry_json = json.loads(row['entry'])
-            self.client.write_invoice(entry_json)
+            client.write_invoice(entry_json)
 
     def get_refresh_token(self, oauth):
 

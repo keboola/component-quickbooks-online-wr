@@ -1,6 +1,5 @@
 import backoff
 import logging
-from typing import Tuple
 from requests.exceptions import HTTPError
 from requests.auth import HTTPBasicAuth
 
