@@ -13,7 +13,7 @@ class QuickbooksClientException(Exception):
 
 class QuickbooksClient(HttpClient):
 
-    def __init__(self, company_id: str, refresh_token: str, access_token: str, oauth, sandbox: bool):
+    def __init__(self, company_id: str, refresh_token: str, oauth, sandbox: bool):
         if not sandbox:
             base_url = f"https://quickbooks.api.intuit.com/v3/company/{company_id}"
         else:
@@ -22,26 +22,17 @@ class QuickbooksClient(HttpClient):
 
         super().__init__(base_url)
 
-        self.access_token = access_token
         self.refresh_token = refresh_token
+        self.access_token = None
+        self.access_token_refreshed = False
         self.app_key = oauth.appKey
         self.app_secret = oauth.appSecret
-        self.access_token_refreshed = False
 
     def write_journal(self, entry: dict):
         self._post("journalentry", data=entry)
 
     def write_invoice(self, entry: dict):
         self._post("invoice", data=entry)
-
-    def get_new_refresh_token(self) -> Tuple[str, str]:
-        try:
-            self.refresh_access_token()
-        except Exception as e:
-            raise QuickbooksClientException(e) from e
-
-        self.access_token_refreshed = False  # this is here in case the token would change during the component run
-        return self.refresh_token, self.access_token
 
     @backoff.on_exception(backoff.expo, HTTPError, max_tries=3)
     def refresh_access_token(self):
@@ -71,8 +62,12 @@ class QuickbooksClient(HttpClient):
         self.access_token_refreshed = True
 
     def _post(self, endpoint, data):
+        headers = {
+            "Authorization": "Bearer " + self.access_token,
+            "Accept": "application/json"
+        }
         try:
-            r = self.post_raw(endpoint, data=data)
+            r = self.post_raw(endpoint, data=data, headers=headers)
             r.raise_for_status()
         except HTTPError as e:
             raise QuickbooksClientException(e)
