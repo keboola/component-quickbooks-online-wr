@@ -36,7 +36,7 @@ class Component(ComponentBase):
         oauth = self.configuration.oauth_credentials
         sandbox = self.configuration.parameters.get(KEY_SANDBOX, False)
         company_id = self.configuration.parameters.get(KEY_COMPANY_ID)
-        endpoint = self.configuration.parameters.get(KEY_ENDPOINT)
+        endpoint = self.configuration.parameters.get(KEY_ENDPOINT)[0]
         fail_on_error = self.configuration.parameters.get(KEY_FAIL_ON_ERROR, False)
 
         self.refresh_token = self.get_refresh_token(oauth)
