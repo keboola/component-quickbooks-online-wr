@@ -29,11 +29,11 @@ class QuickbooksClient(HttpClient):
         self.app_secret = oauth.appSecret
         self.fail_on_error = fail_on_error
 
-    def write_journal(self, entry: dict):
+    def write_journal(self, entry: dict) -> dict:
         error = self._post("journalentry", data=entry)
         return error
 
-    def write_invoice(self, entry: dict):
+    def write_invoice(self, entry: dict) -> dict:
         error = self._post("invoice", data=entry)
         return error
 

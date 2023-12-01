@@ -33,7 +33,7 @@
     },
     "fail_on_error": {
           "type": "boolean",
-          "title": "Permanent Files (optional)",
+          "title": "Fail on error",
           "default": false,
           "format": "checkbox",
           "description": "When set to true, the component will halt the run upon encountering the first error. Alternatively, if set to false, the component will persist in processing all entries, storing any failed requests in the results table.",
