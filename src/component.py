@@ -71,7 +71,7 @@ class Component(ComponentBase):
     def process_endpoint(self, client, reader: csv.DictReader, function: Callable, fail_on_error: bool):
         if not fail_on_error:
             for row in reader:
-                data = json.loads(row['entry'])
+                data = json.loads(row['data'])
                 client.write_journal(data)
         else:
             self.result_table = self.create_out_table_definition("results", primary_key=["id"], incremental=True)
