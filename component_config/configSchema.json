@@ -5,7 +5,7 @@
     "endpoints"
   ],
   "properties": {
-    "companyid": {
+    "company_id": {
       "type": "string",
       "title": "Company ID",
       "default": "",
@@ -13,9 +13,9 @@
       "description": "Can be found under QuickBooks account's \"Account and Setting\". Does not contain any spaces.",
       "propertyOrder": 1
     },
-    "endpoints": {
+    "endpoint": {
       "type": "array",
-      "title": "Endpoints",
+      "title": "Endpoint",
       "format": "select",
       "items": {
         "type": "string",
