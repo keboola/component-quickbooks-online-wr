@@ -60,7 +60,8 @@ class Component(ComponentBase):
             else:
                 raise UserException(f"Unsupported endpoint: {endpoint}")
 
-        self.write_manifest(self.result_table)
+        if self.result_table:
+            self.write_manifest(self.result_table)
 
         self.write_state_file({
             "token":
