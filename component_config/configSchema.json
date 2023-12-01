@@ -2,7 +2,7 @@
   "type": "object",
   "title": "QuickBooks",
   "required": [
-    "endpoints"
+    "endpoint"
   ],
   "properties": {
     "company_id": {
