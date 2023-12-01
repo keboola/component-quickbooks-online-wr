@@ -83,4 +83,3 @@ class QuickbooksClient(HttpClient):
             if self.fail_on_error:
                 raise QuickbooksClientException(e)
             return r.json()
-
