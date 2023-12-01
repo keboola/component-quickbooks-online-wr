@@ -1,4 +1,5 @@
 import backoff
+import json
 import logging
 from requests.exceptions import HTTPError
 from requests.auth import HTTPBasicAuth
@@ -12,26 +13,29 @@ class QuickbooksClientException(Exception):
 
 class QuickbooksClient(HttpClient):
 
-    def __init__(self, company_id: str, refresh_token: str, oauth, sandbox: bool):
+    def __init__(self, company_id: str, refresh_token: str, oauth, sandbox: bool, fail_on_error: bool = False):
         if not sandbox:
             base_url = f"https://quickbooks.api.intuit.com/v3/company/{company_id}"
         else:
             base_url = f"https://sandbox-quickbooks.api.intuit.com/v3/company/{company_id}"
-        logging.info(f"Using BaseUrl: {base_url}")
+        logging.debug(f"Using BaseUrl: {base_url}")
 
-        super().__init__(base_url)
+        super().__init__(base_url, max_retries=5)
 
         self.refresh_token = refresh_token
         self.access_token = None
         self.access_token_refreshed = False
         self.app_key = oauth.appKey
         self.app_secret = oauth.appSecret
+        self.fail_on_error = fail_on_error
 
     def write_journal(self, entry: dict):
-        self._post("journalentry", data=entry)
+        error = self._post("journalentry", data=entry)
+        return error
 
     def write_invoice(self, entry: dict):
-        self._post("invoice", data=entry)
+        error = self._post("invoice", data=entry)
+        return error
 
     @backoff.on_exception(backoff.expo, HTTPError, max_tries=3)
     def refresh_access_token(self):
@@ -60,13 +64,23 @@ class QuickbooksClient(HttpClient):
         self.refresh_token = results["refresh_token"]
         self.access_token_refreshed = True
 
-    def _post(self, endpoint, data):
+    def _post(self, endpoint, data: dict):
         headers = {
             "Authorization": "Bearer " + self.access_token,
-            "Accept": "application/json"
+            "Content-type": "application/json"
         }
+        params = {
+            "minorversion": 69
+        }
+
         try:
-            r = self.post_raw(endpoint, data=data, headers=headers)
+            json_data = json.dumps(data)
+            logging.debug(f"Processing request: {endpoint}, {json_data}")
+            r = self.post_raw(endpoint, data=json_data, headers=headers, params=params)
             r.raise_for_status()
+            return False
         except HTTPError as e:
-            raise QuickbooksClientException(e)
+            if self.fail_on_error:
+                return r.json()
+            else:
+                raise QuickbooksClientException(e)
