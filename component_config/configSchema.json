@@ -1,9 +1,7 @@
 {
   "type": "object",
   "title": "QuickBooks",
-  "required": [
-    "endpoint"
-  ],
+  "required": [],
   "properties": {
     "company_id": {
       "type": "string",
@@ -25,9 +23,6 @@
         ]
       },
       "uniqueItems": true,
-      "options": {
-        "tags": true
-      },
       "description": "Select which endpoints you want to process.",
       "propertyOrder": 2
     },
