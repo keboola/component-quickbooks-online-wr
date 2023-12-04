@@ -23,13 +23,13 @@ REQUIRED_IMAGE_PARS = []
 
 
 class Component(ComponentBase):
-    FAILED_TABLE_NAME = "errors"
+    ERRORS_TABLE_NAME = "errors"
 
     def __init__(self):
         super().__init__()
         self.client: QuickbooksClient
         self.refresh_token = None
-        self.result_table = None
+        self.errors_table = None
 
     def run(self):
         self.validate_configuration_parameters(REQUIRED_PARAMETERS)
@@ -60,8 +60,8 @@ class Component(ComponentBase):
             else:
                 raise UserException(f"Unsupported endpoint: {endpoint}")
 
-        if self.result_table:
-            self.write_manifest(self.result_table)
+        if self.errors_table:
+            self.write_manifest(self.errors_table)
 
         self.write_state_file({
             "token":
@@ -75,9 +75,9 @@ class Component(ComponentBase):
                 data = json.loads(row['data'])
                 client.write_journal(data)
         else:
-            self.result_table = self.create_out_table_definition(self.FAILED_TABLE_NAME, primary_key=["id"],
+            self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME, primary_key=["id"],
                                                                  incremental=True)
-            with open(self.result_table.full_path, 'w') as f:
+            with open(self.errors_table.full_path, 'w') as f:
                 writer = csv.DictWriter(f, fieldnames=["id", "error"])
                 for row in reader:
                     try:
