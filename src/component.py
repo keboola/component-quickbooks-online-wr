@@ -23,7 +23,7 @@ REQUIRED_IMAGE_PARS = []
 
 
 class Component(ComponentBase):
-    BASE_URL = "https://quickbooks.api.intuit.com"
+    FAILED_TABLE_NAME = "errors"
 
     def __init__(self):
         super().__init__()
@@ -75,7 +75,8 @@ class Component(ComponentBase):
                 data = json.loads(row['data'])
                 client.write_journal(data)
         else:
-            self.result_table = self.create_out_table_definition("results", primary_key=["id"], incremental=True)
+            self.result_table = self.create_out_table_definition(self.FAILED_TABLE_NAME, primary_key=["id"],
+                                                                 incremental=True)
             with open(self.result_table.full_path, 'w') as f:
                 writer = csv.DictWriter(f, fieldnames=["id", "error"])
                 for row in reader:
