@@ -1,6 +1,7 @@
 import csv
 import json
 import logging
+import os
 import datetime
 from typing import Callable
 
@@ -12,14 +13,17 @@ from client import QuickbooksClient
 # configuration variables
 KEY_API_TOKEN = '#api_token'
 KEY_SANDBOX = 'sandbox'
-KEY_ENDPOINT = 'endpoint'
+KEY_ENDPOINTS = 'endpoints'
 KEY_COMPANY_ID = 'company_id'
 KEY_FAIL_ON_ERROR = 'fail_on_error'
 
-# list of mandatory parameters => if some is missing,
-# component will fail with readable message on initialization.
-REQUIRED_PARAMETERS = [KEY_COMPANY_ID, KEY_ENDPOINT]
-REQUIRED_IMAGE_PARS = []
+
+REQUIRED_PARAMETERS = [KEY_COMPANY_ID, KEY_ENDPOINTS]
+
+endpoint_table_mapping = {
+    "invoices": "invoices.csv",
+    "journals": "journals.csv"
+}
 
 
 class Component(ComponentBase):
@@ -36,29 +40,32 @@ class Component(ComponentBase):
         oauth = self.configuration.oauth_credentials
         sandbox = self.configuration.parameters.get(KEY_SANDBOX, False)
         company_id = self.configuration.parameters.get(KEY_COMPANY_ID)
-        endpoint = self.configuration.parameters.get(KEY_ENDPOINT)[0]
+        endpoints = self.configuration.parameters.get(KEY_ENDPOINTS, [])
         fail_on_error = self.configuration.parameters.get(KEY_FAIL_ON_ERROR, False)
 
         self.refresh_token = self.get_refresh_token(oauth)
 
-        in_tables = self.get_input_tables_definitions()
-        in_table = in_tables[0] if in_tables else None
-
-        if not in_table:
-            raise UserException("No input table found, exiting.")
+        if not endpoints:
+            raise UserException("Endpoints parameter cannot be empty.")
 
         client = QuickbooksClient(company_id, self.refresh_token, oauth, sandbox, fail_on_error)
         client.refresh_access_token()
 
-        with open(in_table.full_path, 'r') as f:
-            reader = csv.DictReader(f)
+        tables_in_path = self.tables_in_path
+        for endpoint in endpoints:
 
-            if endpoint == "journals":
-                self.process_endpoint(client, reader, client.write_journal, fail_on_error)
-            elif endpoint == "invoices":
-                self.process_endpoint(client, reader, client.write_invoice, fail_on_error)
-            else:
+            if endpoint not in endpoint_table_mapping.keys():
                 raise UserException(f"Unsupported endpoint: {endpoint}")
+
+            in_table_path = os.path.join(tables_in_path, endpoint_table_mapping.get(endpoint))
+
+            if not os.path.exists(in_table_path):
+                raise UserException(f"Input table for selected endpoint {endpoint} not found. Table's name should be "
+                                    f"{endpoint_table_mapping.get(endpoint)}")
+
+            with open(in_table_path, 'r') as f:
+                reader = csv.DictReader(f)
+                self.process_endpoint(client, reader, endpoint, fail_on_error)
 
         if self.errors_table:
             self.write_manifest(self.errors_table)
@@ -69,8 +76,18 @@ class Component(ComponentBase):
                  "#refresh_token": client.refresh_token}
         })
 
-    def process_endpoint(self, client, reader: csv.DictReader, function: Callable, fail_on_error: bool):
-        if not fail_on_error:
+    def process_endpoint(self, client, reader: csv.DictReader, endpoint, fail_on_error: bool):
+
+        logging.info(f"Processing endpoint: {endpoint}")
+
+        if endpoint == "journals":
+            function = client.write_journal
+        elif endpoint == "invoices":
+            function = client.write_invoice
+        else:
+            raise UserException(f"Unsupported endpoint: {endpoint}")
+
+        if fail_on_error:
             for row in reader:
                 data = json.loads(row['data'])
                 client.write_journal(data)
