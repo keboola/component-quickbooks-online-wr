@@ -1,8 +1,10 @@
+import backoff
 import csv
+import datetime
 import json
 import logging
 import os
-import datetime
+import requests
 
 from keboola.component.base import ComponentBase
 from keboola.component.exceptions import UserException
@@ -23,6 +25,11 @@ endpoint_table_mapping = {
     "invoices": "invoices.csv",
     "journals": "journals.csv"
 }
+
+URL_SUFFIXES = {"US": ".keboola.com",
+                "EU": ".eu-central-1.keboola.com",
+                "AZURE-EU": ".north-europe.azure.keboola.com",
+                "CURRENT_STACK": os.environ.get('KBC_STACKID', 'connection.keboola.com').replace('connection', '')}
 
 
 class Component(ComponentBase):
@@ -48,7 +55,7 @@ class Component(ComponentBase):
             raise UserException("Endpoints parameter cannot be empty.")
 
         client = QuickbooksClient(company_id, self.refresh_token, oauth, sandbox, fail_on_error)
-        client.refresh_access_token()
+        self.process_oauth_tokens(client, sandbox)
 
         tables_in_path = self.tables_in_path
         for endpoint in endpoints:
@@ -108,6 +115,17 @@ class Component(ComponentBase):
                         }
                         writer.writerow(error_to_write)
 
+    def process_oauth_tokens(self, client: QuickbooksClient, sandbox: bool) -> None:
+        """Uses Quickbooks client to get new tokens and saves them using API if they have changed since the last run."""
+        new_refresh_token = client.refresh_access_token()
+        if self.refresh_token != new_refresh_token:
+            if not sandbox:
+                self.save_new_oauth_token(new_refresh_token)
+
+            # We also save new tokens to class vars, so we can save them unencrypted if case statefile update fails
+            # in update_config_state() method.
+            self.refresh_token = new_refresh_token
+
     def get_refresh_token(self, oauth):
 
         try:
@@ -122,13 +140,88 @@ class Component(ComponentBase):
 
             if ts_statefile > ts_oauth:
                 refresh_token = statefile["token"].get("#refresh_token")
-                logging.debug("Loaded tokens from statefile.")
+                logging.debug("Loaded token from statefile.")
             else:
-                logging.debug("Using tokens from oAuth.")
+                logging.debug("Using token from oAuth.")
         else:
-            logging.warning("No timestamp found in statefile. Using oAuth tokens.")
+            logging.warning("No timestamp found in statefile. Using oAuth token.")
 
         return refresh_token
+
+    def save_new_oauth_token(self, refresh_token: str) -> None:
+        logging.debug("Saving new token to state using Keboola API.")
+
+        encrypted_refresh_token = self.encrypt(refresh_token)
+
+        new_state = {
+            "component": {
+                "token":
+                    {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                     "#refresh_token": encrypted_refresh_token}
+            }}
+        self.update_config_state(region="CURRENT_STACK",
+                                 component_id=self.environment_variables.component_id,
+                                 configurationId=self.environment_variables.config_id,
+                                 state=new_state,
+                                 branch_id=self.environment_variables.branch_id)
+
+    @backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=5)
+    def encrypt(self, token: str) -> str:
+        url = "https://encryption.keboola.com/encrypt"
+        params = {
+            "componentId": self.environment_variables.component_id,
+            "projectId": self.environment_variables.project_id,
+            "configId": self.environment_variables.config_id
+        }
+        headers = {"Content-Type": "text/plain"}
+
+        response = requests.post(url,
+                                 data=token,
+                                 params=params,
+                                 headers=headers)
+        try:
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Unable to encrypt token using Keboola encrypt API: {e}")
+            self.write_state_file({
+                "token":
+                    {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                     "#refresh_token": self.refresh_token}
+            })
+            exit(0)
+        else:
+            return response.text
+
+    @backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=5)
+    def update_config_state(self, region, component_id, configurationId, state, branch_id='default'):
+        if not branch_id:
+            branch_id = 'default'
+
+        url = f'https://connection{URL_SUFFIXES[region]}/v2/storage/branch/{branch_id}' \
+              f'/components/{component_id}/configs/' \
+              f'{configurationId}/state'
+
+        parameters = {'state': json.dumps(state)}
+        headers = {'Content-Type': 'application/x-www-form-urlencoded', 'X-StorageApi-Token': self._get_storage_token()}
+        response = requests.put(url,
+                                data=parameters,
+                                headers=headers)
+        try:
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Unable to update component state using Keboola Storage API: {e}")
+            self.write_state_file({
+                "token":
+                    {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                     "#refresh_token": self.refresh_token}
+            })
+            exit(0)
+
+    def _get_storage_token(self) -> str:
+        token = self.configuration.parameters.get('#storage_token') or self.environment_variables.token
+        if not token:
+            raise UserException("Cannot retrieve storage token from env variables and/or config.")
+        return token
 
 
 """
