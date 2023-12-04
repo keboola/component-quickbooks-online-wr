@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import datetime
-from typing import Callable
 
 from keboola.component.base import ComponentBase
 from keboola.component.exceptions import UserException
