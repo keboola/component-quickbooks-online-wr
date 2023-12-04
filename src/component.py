@@ -111,6 +111,7 @@ class Component(ComponentBase):
                     if error:
                         error_to_write = {
                             "id": row['id'],
+                            "endpoint": endpoint,
                             "error": error
                         }
                         writer.writerow(error_to_write)
