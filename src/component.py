@@ -98,10 +98,11 @@ class Component(ComponentBase):
                 data = json.loads(row['data'])
                 client.write_journal(data)
         else:
-            self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME, primary_key=["id"],
-                                                                 incremental=True)
+            self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME, primary_key=["id", "endpoint"],
+                                                                 incremental=True, write_always=True)
             with open(self.errors_table.full_path, 'w') as f:
                 writer = csv.DictWriter(f, fieldnames=["id", "endpoint", "error"])
+                writer.writeheader()
                 for row in reader:
                     try:
                         data = json.loads(row['data'])
@@ -120,6 +121,7 @@ class Component(ComponentBase):
         """Uses Quickbooks client to get new tokens and saves them using API if they have changed since the last run."""
         new_refresh_token = client.refresh_access_token()
         if self.refresh_token != new_refresh_token:
+
             if not sandbox:
                 self.save_new_oauth_token(new_refresh_token)
 
