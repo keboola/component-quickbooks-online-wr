@@ -101,7 +101,7 @@ class Component(ComponentBase):
             self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME, primary_key=["id"],
                                                                  incremental=True)
             with open(self.errors_table.full_path, 'w') as f:
-                writer = csv.DictWriter(f, fieldnames=["id", "error"])
+                writer = csv.DictWriter(f, fieldnames=["id", "endpoint", "error"])
                 for row in reader:
                     try:
                         data = json.loads(row['data'])
@@ -112,7 +112,7 @@ class Component(ComponentBase):
                         error_to_write = {
                             "id": row['id'],
                             "endpoint": endpoint,
-                            "error": error
+                            "error": str(error)
                         }
                         writer.writerow(error_to_write)
 

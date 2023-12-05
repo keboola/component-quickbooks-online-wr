@@ -13,7 +13,7 @@
     },
     "endpoints": {
       "type": "array",
-      "title": "Endpoint",
+      "title": "Endpoints",
       "format": "select",
       "items": {
         "type": "string",
