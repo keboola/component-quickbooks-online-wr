@@ -82,54 +82,55 @@ class Component(ComponentBase):
         })
 
     def process_endpoint(self, client, csv_path: str, endpoint, fail_on_error: bool):
-
         logging.info(f"Processing endpoint: {endpoint}")
 
         self.check_columns(endpoint, csv_path)
         group_ids = self.get_unique_group_ids(csv_path)
 
         if fail_on_error:
-            for group_id in group_ids:
-                with open(csv_path, 'r') as f:
-                    reader = csv.DictReader(f)
-                    data = []
-                    for row in reader:
-                        if row['GroupId'] == group_id:  # noqa
-                            data.append(row)
-
-                    entries = create_entries(endpoint, data)
-                    r = client.send(endpoint, entries)
-
-                    if 'Fault' in r:
-                        raise UserException(f"Error processing row with Id {row['Id']}: {r['Fault']}")  # noqa
-
-                    group_ids.remove(group_id)
-
+            self.process_with_failure(client, csv_path, endpoint, group_ids)
         else:
-            self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME, primary_key=["id", "endpoint"],
-                                                                 incremental=True, write_always=True)
-            with open(self.errors_table.full_path, 'w') as ef:
-                writer = csv.DictWriter(ef, fieldnames=["id", "endpoint", "error"])
-                writer.writeheader()
-                for group_id in group_ids:
-                    with open(csv_path, 'r') as f:
-                        reader = csv.DictReader(f)
-                        data = []
-                        for row in reader:
-                            if row['GroupId'] == group_id:  # noqa
-                                data.append(row)
+            self.process_with_logging(client, csv_path, endpoint, group_ids)
 
-                        entries = create_entries(endpoint, data)
-                        r = client.send(endpoint, entries)
+    def process_with_failure(self, client, csv_path, endpoint, group_ids):
+        for group_id in group_ids:
+            data = self.read_group_data(csv_path, group_id)
+            entries = create_entries(endpoint, data)
+            response = client.send(endpoint, entries)
 
-                        if r:
-                            error_to_write = {
-                                "id": row['Id'],  # noqa
-                                "endpoint": endpoint,
-                                "error": str(r['Fault'])
-                            }
-                            logging.warning(error_to_write)
-                            writer.writerow(error_to_write)
+            if 'Fault' in response:
+                raise UserException(f"Error processing row with Id {data[0]['Id']}: {response['Fault']}")
+
+    def process_with_logging(self, client, csv_path, endpoint, group_ids):
+        self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME, primary_key=["id", "endpoint"],
+                                                             incremental=True, write_always=True)
+        with open(self.errors_table.full_path, 'w') as ef:
+            writer = csv.DictWriter(ef, fieldnames=["id", "endpoint", "error"])
+            writer.writeheader()
+
+            for group_id in group_ids:
+                data = self.read_group_data(csv_path, group_id)
+                entries = create_entries(endpoint, data)
+                response = client.send(endpoint, entries)
+
+                if response:
+                    error_to_write = {
+                        "id": data[0]['Id'],
+                        "endpoint": endpoint,
+                        "error": str(response['Fault'])
+                    }
+                    logging.warning(error_to_write)
+                    writer.writerow(error_to_write)
+
+    @staticmethod
+    def read_group_data(csv_path, group_id):
+        data = []
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row['GroupId'] == group_id:  # noqa
+                    data.append(row)
+        return data
 
     @staticmethod
     def check_columns(endpoint, csv_path):
