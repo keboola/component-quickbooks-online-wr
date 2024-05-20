@@ -1,5 +1,4 @@
 import backoff
-import json
 import logging
 from requests.exceptions import HTTPError
 from requests.auth import HTTPBasicAuth
