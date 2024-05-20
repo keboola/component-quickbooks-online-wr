@@ -29,12 +29,8 @@ class QuickbooksClient(HttpClient):
         self.app_secret = oauth.appSecret
         self.fail_on_error = fail_on_error
 
-    def write_journal(self, entry: dict) -> dict:
-        error = self._post("journalentry", data=entry)
-        return error
-
-    def write_invoice(self, entry: dict) -> dict:
-        error = self._post("invoice", data=entry)
+    def send(self, endpoint: str, entry: dict) -> dict:
+        error = self._post(endpoint, data=entry)
         return error
 
     @backoff.on_exception(backoff.expo, HTTPError, max_tries=3)
@@ -69,17 +65,14 @@ class QuickbooksClient(HttpClient):
             "Authorization": "Bearer " + self.access_token,
             "Content-type": "application/json"
         }
-        params = {
-            "minorversion": 69
-        }
 
         try:
-            json_data = json.dumps(data)
-            logging.debug(f"Processing request: {endpoint}, {json_data}")
-            r = self.post_raw(endpoint, data=json_data, headers=headers, params=params)
+            logging.debug(f"Processing request: {endpoint}, {data}")
+            r = self.post_raw(endpoint, json=data, headers=headers)
+            logging.debug(f"Response: {r.text}")
             r.raise_for_status()
             return False
         except HTTPError as e:
             if self.fail_on_error:
-                raise QuickbooksClientException(e)
+                raise QuickbooksClientException(f"Failed to post data to Quickbooks: {e}, received response: {r.text}")
             return r.json()

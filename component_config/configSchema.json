@@ -18,8 +18,7 @@
       "items": {
         "type": "string",
         "enum": [
-          "journals",
-          "invoices"
+          "journal_entry"
         ]
       },
       "uniqueItems": true,
