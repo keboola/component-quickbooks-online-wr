@@ -9,7 +9,8 @@ import requests
 from keboola.component.base import ComponentBase
 from keboola.component.exceptions import UserException
 
-from client import QuickbooksClient
+from client import QuickbooksClient, QuickbooksClientException
+from mapping import expected_columns, create_entries
 
 # configuration variables
 KEY_API_TOKEN = '#api_token'
@@ -18,13 +19,9 @@ KEY_ENDPOINTS = 'endpoints'
 KEY_COMPANY_ID = 'company_id'
 KEY_FAIL_ON_ERROR = 'fail_on_error'
 
-
 REQUIRED_PARAMETERS = [KEY_COMPANY_ID, KEY_ENDPOINTS]
 
-endpoint_table_mapping = {
-    "invoices": "invoices.csv",
-    "journals": "journals.csv"
-}
+supported_endpoints = ["journalentry"]
 
 URL_SUFFIXES = {"US": ".keboola.com",
                 "EU": ".eu-central-1.keboola.com",
@@ -60,18 +57,20 @@ class Component(ComponentBase):
         tables_in_path = self.tables_in_path
         for endpoint in endpoints:
 
-            if endpoint not in endpoint_table_mapping.keys():
+            if endpoint not in supported_endpoints:
                 raise UserException(f"Unsupported endpoint: {endpoint}")
 
-            in_table_path = os.path.join(tables_in_path, endpoint_table_mapping.get(endpoint))
+            table_name = f"{endpoint}.csv"
+            in_table_path = os.path.join(tables_in_path, table_name)
 
             if not os.path.exists(in_table_path):
                 raise UserException(f"Input table for selected endpoint {endpoint} not found. Table's name should be "
-                                    f"{endpoint_table_mapping.get(endpoint)}")
+                                    f"{table_name}")
 
-            with open(in_table_path, 'r') as f:
-                reader = csv.DictReader(f)
-                self.process_endpoint(client, reader, endpoint, fail_on_error)
+            try:
+                self.process_endpoint(client, in_table_path, endpoint, fail_on_error)
+            except QuickbooksClientException as e:
+                raise UserException(f"Error processing endpoint {endpoint}: {e}")
 
         if self.errors_table:
             self.write_manifest(self.errors_table)
@@ -82,40 +81,83 @@ class Component(ComponentBase):
                  "#refresh_token": client.refresh_token}
         })
 
-    def process_endpoint(self, client, reader: csv.DictReader, endpoint, fail_on_error: bool):
-
+    def process_endpoint(self, client, csv_path: str, endpoint, fail_on_error: bool):
         logging.info(f"Processing endpoint: {endpoint}")
 
-        if endpoint == "journals":
-            function = client.write_journal
-        elif endpoint == "invoices":
-            function = client.write_invoice
-        else:
-            raise UserException(f"Unsupported endpoint: {endpoint}")
+        self.check_columns(endpoint, csv_path)
+        group_ids = self.get_unique_group_ids(csv_path)
 
         if fail_on_error:
-            for row in reader:
-                data = json.loads(row['data'])
-                client.write_journal(data)
+            self.process_with_failure(client, csv_path, endpoint, group_ids)
         else:
-            self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME, primary_key=["id", "endpoint"],
-                                                                 incremental=True, write_always=True)
-            with open(self.errors_table.full_path, 'w') as f:
-                writer = csv.DictWriter(f, fieldnames=["id", "endpoint", "error"])
-                writer.writeheader()
-                for row in reader:
-                    try:
-                        data = json.loads(row['data'])
-                    except json.decoder.JSONDecodeError as e:
-                        raise UserException(f"Cannot decode row {row['id']}: {e}")
-                    error = function(data)
-                    if error:
-                        error_to_write = {
-                            "id": row['id'],
-                            "endpoint": endpoint,
-                            "error": str(error)
-                        }
-                        writer.writerow(error_to_write)
+            self.process_with_logging(client, csv_path, endpoint, group_ids)
+
+    def process_with_failure(self, client, csv_path, endpoint, group_ids):
+        for group_id in group_ids:
+            data = self.read_group_data(csv_path, group_id)
+            entries = create_entries(endpoint, data)
+            response = client.send(endpoint, entries)
+
+            if 'Fault' in response:
+                raise UserException(f"Error processing row with Id {data[0]['Id']}: {response['Fault']}")
+
+    def process_with_logging(self, client, csv_path, endpoint, group_ids):
+        self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME, primary_key=["id", "endpoint"],
+                                                             incremental=True, write_always=True)
+        with open(self.errors_table.full_path, 'w') as ef:
+            writer = csv.DictWriter(ef, fieldnames=["id", "endpoint", "error"])
+            writer.writeheader()
+
+            for group_id in group_ids:
+                data = self.read_group_data(csv_path, group_id)
+                entries = create_entries(endpoint, data)
+                response = client.send(endpoint, entries)
+
+                if response:
+                    error_to_write = {
+                        "id": data[0]['Id'],
+                        "endpoint": endpoint,
+                        "error": str(response['Fault'])
+                    }
+                    logging.warning(error_to_write)
+                    writer.writerow(error_to_write)
+
+    @staticmethod
+    def read_group_data(csv_path, group_id):
+        data = []
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row['GroupId'] == group_id:  # noqa
+                    data.append(row)
+        return data
+
+    @staticmethod
+    def check_columns(endpoint, csv_path):
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            csv_columns = reader.fieldnames
+            missing_columns = [col for col in expected_columns[endpoint] if col not in csv_columns]
+            if missing_columns:
+                raise UserException(f"Missing columns in input table for endpoint {endpoint}: {missing_columns}")
+
+    @staticmethod
+    def get_unique_group_ids(csv_path: str) -> set:
+        """
+        Extracts unique GroupId values from a CSV reader.
+
+        Parameters:
+        reader (str): Path to csv file.
+
+        Returns:
+        set: A set of unique GroupId values.
+        """
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            group_ids = set()
+            for row in reader:
+                group_ids.add(row['GroupId']) # noqa
+            return group_ids
 
     def process_oauth_tokens(self, client: QuickbooksClient, sandbox: bool) -> None:
         """Uses Quickbooks client to get new tokens and saves them using API if they have changed since the last run."""
@@ -125,8 +167,6 @@ class Component(ComponentBase):
             if not sandbox:
                 self.save_new_oauth_token(new_refresh_token)
 
-            # We also save new tokens to class vars, so we can save them unencrypted if case statefile update fails
-            # in update_config_state() method.
             self.refresh_token = new_refresh_token
 
     def get_refresh_token(self, oauth):
@@ -154,7 +194,11 @@ class Component(ComponentBase):
     def save_new_oauth_token(self, refresh_token: str) -> None:
         logging.debug("Saving new token to state using Keboola API.")
 
-        encrypted_refresh_token = self.encrypt(refresh_token)
+        try:
+            encrypted_refresh_token = self.encrypt(refresh_token)
+        except requests.exceptions.RequestException:
+            logging.warning("Encrypt API is unavailable. Skipping token save at the beginning of the run.")
+            return
 
         new_state = {
             "component": {
@@ -182,18 +226,8 @@ class Component(ComponentBase):
                                  data=token,
                                  params=params,
                                  headers=headers)
-        try:
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Unable to encrypt token using Keboola encrypt API: {e}")
-            self.write_state_file({
-                "token":
-                    {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
-                     "#refresh_token": self.refresh_token}
-            })
-            exit(0)
-        else:
-            return response.text
+        response.raise_for_status()
+        return response.text
 
     @backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=5)
     def update_config_state(self, region, component_id, configurationId, state, branch_id='default'):

@@ -10,22 +10,27 @@ Description
 Functionality notes
 ===================
 
+So far only journals endpoint is supported. 
+
 Prerequisites
 =============
 
-Get the API token, register application, etc.
+Quickbooks Online Account
+
+Input table with following columns:
+
+{
+    "journalentry":
+        ["GroupId", "Type", "TxnDate", "PrivateNote", "AcctNum", "FullyQualifiedName", "Amount", "Description", "Id",
+         "ClassRefName", "DepartmentRefName", "ClassRefValue", "DepartmentRefValue", "EntityName", "DocNumber"]
+}
+
+For more info, please refer to the [Quickbooks Online API](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/journalentry)
 
 Features
 ========
 
-| **Feature**             | **Note**                                      |
-|-------------------------|-----------------------------------------------|
-| Generic UI form         | Dynamic UI form                               |
-| Row Based configuration | Allows structuring the configuration in rows. |
-| oAuth                   | oAuth authentication enabled                  |
-| Incremental loading     | Allows fetching data in new increments.       |
-| Backfill mode           | Support for seamless backfill setup.          |
-| Date range filter       | Specify date range.                           |
+-   **Journals** - List of journals
 
 Supported endpoints
 ===================
@@ -36,16 +41,12 @@ If you need more endpoints, please submit your request to
 Configuration
 =============
 
-Param 1
--------
-
-Param 2
--------
+TODO
 
 Output
 ======
 
-List of tables, foreign keys, schema.
+TODO
 
 Development
 -----------
