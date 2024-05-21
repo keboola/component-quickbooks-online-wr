@@ -36,12 +36,15 @@ def create_entries(endpoint: str, data: list) -> dict:
                     "value": row.get("DepartmentRefValue")
                 }
 
-            lines.append({
+            additional_line_detail = {
                 "JournalEntryLineDetail": line_detail,
                 "DetailType": "JournalEntryLineDetail",
                 "Amount": float(row["Amount"]),
                 "Description": row["Description"]
-            })
+            }
+            if row.get("Id"):
+                additional_line_detail["Id"] = row["Id"]
+            lines.append(additional_line_detail)
 
         entries["Line"] = lines
         return entries
