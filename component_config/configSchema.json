@@ -26,17 +26,11 @@
       "propertyOrder": 2
     },
     "action": {
-      "type": "array",
-      "title": "Endpoints",
-      "format": "select",
-      "items": {
-        "type": "string",
-        "enum": [
-            "create"
-        ]
-      },
+      "type": "string",
+      "title": "Action",
+      "enum": ["create"],
       "uniqueItems": true,
-      "description": "Select which endpoints you want to process.",
+      "description": "Select which action you want to perform.",
       "propertyOrder": 3
     },
     "fail_on_error": {
