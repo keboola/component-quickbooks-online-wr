@@ -1,13 +1,20 @@
+import logging
+
+from client import QuickbooksClientException
+
 expected_columns = {
-    "journalentry":
-        ["GroupId", "Type", "TxnDate", "PrivateNote", "AcctNum", "FullyQualifiedName", "Amount", "Description", "Id",
-         "ClassRefName", "DepartmentRefName", "ClassRefValue", "DepartmentRefValue", "EntityName", "DocNumber"]
+    "journalentry": {
+        "create": ["Id", "Type", "TxnDate", "PrivateNote", "AccountRefName", "AccountRefValue", "Amount",
+                   "Description", "ClassRefName", "DepartmentRefName", "ClassRefValue", "DepartmentRefValue",
+                   "EntityName", "DocNumber"]
+    }
 }
 
 
-def create_entries(endpoint: str, data: list) -> dict:
+def create_entries(endpoint: str, action, data: list) -> dict:
     entries = {}
-    if endpoint == "journalentry":
+
+    if endpoint == "journalentry" and action == "create":
         entries["TxnDate"] = data[0]["TxnDate"]
         entries["DocNumber"] = data[0]["DocNumber"]
         entries["PrivateNote"] = data[0]["PrivateNote"]
@@ -19,8 +26,8 @@ def create_entries(endpoint: str, data: list) -> dict:
             line_detail = {
                 "PostingType": row["Type"],
                 "AccountRef": {
-                    "name": row.get("FullyQualifiedName"),
-                    "value": row["AcctNum"]
+                    "name": row.get("AccountRefName"),
+                    "value": row["AccountRefValue"]
                 }
             }
 
@@ -42,11 +49,11 @@ def create_entries(endpoint: str, data: list) -> dict:
                 "Amount": float(row["Amount"]),
                 "Description": row["Description"]
             }
-            if row.get("Id"):
-                additional_line_detail["Id"] = row["Id"]
+
             lines.append(additional_line_detail)
 
         entries["Line"] = lines
+        logging.debug(f"Entries: {entries}")
         return entries
 
-    raise Exception(f"Unsupported endpoint: {endpoint}")
+    raise QuickbooksClientException(f"Unsupported endpoint and action: {endpoint}, {action}")
