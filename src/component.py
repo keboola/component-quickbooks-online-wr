@@ -95,7 +95,10 @@ class Component(ComponentBase):
         for batch in batches:
             data = self.get_batch(csv_path, batch)
             entries = create_entries(endpoint, action, data)
-            response = client.send(endpoint, entries)
+            try:
+                response = client.send(endpoint, entries)
+            except QuickbooksClientException as e:
+                raise UserException(f"Error processing endpoint {endpoint}, action {action}, with data {data}: {e}")
 
             if 'Fault' in response:
                 raise UserException(f"Error processing endpoint {endpoint}, action {action}, with data {data}:"

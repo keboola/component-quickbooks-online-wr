@@ -2,7 +2,7 @@ import backoff
 import logging
 from requests.exceptions import HTTPError
 from requests.auth import HTTPBasicAuth
-
+import requests.exceptions
 from keboola.http_client import HttpClient
 
 
@@ -71,7 +71,10 @@ class QuickbooksClient(HttpClient):
             logging.debug(f"Response: {r.text}")
             r.raise_for_status()
             return False
-        except HTTPError as e:
+        except requests.exceptions.HTTPError as e:
+            if r.status_code == 401:
+                raise QuickbooksClientException("Unauthorized for Quickbooks API, please re-authorize credentials "
+                                                "and check you company_id.")
             if self.fail_on_error:
                 raise QuickbooksClientException(f"Failed to post data to Quickbooks: {e}, received response: {r.text}")
             return r.json()
