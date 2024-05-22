@@ -10,7 +10,7 @@ Description
 Functionality notes
 ===================
 
-So far only journals endpoint is supported. 
+So far only journalentry endpoint is supported with create action. 
 
 Prerequisites
 =============
@@ -19,21 +19,21 @@ Quickbooks Online Account
 
 Input table with following columns:
 
-{
-    "journalentry":
-        ["GroupId", "Type", "TxnDate", "PrivateNote", "AcctNum", "FullyQualifiedName", "Amount", "Description", "Id",
-         "ClassRefName", "DepartmentRefName", "ClassRefValue", "DepartmentRefValue", "EntityName", "DocNumber"]
-}
+    "journalentry": {
+        "create": ["Id", "Type", "TxnDate", "PrivateNote", "AccountRefName", "AccountRefValue", "Amount",
+                   "Description", "ClassRefName", "DepartmentRefName", "ClassRefValue", "DepartmentRefValue",
+                   "EntityName", "DocNumber"]
+    }
+
 
 For more info, please refer to the [Quickbooks Online API](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/journalentry)
 
-Features
-========
-
--   **Journals** - List of journals
 
 Supported endpoints
 ===================
+
+-   **Journal Entry, Create** - Create a journal entry in Quickbooks Online https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/journalentry
+
 
 If you need more endpoints, please submit your request to
 [ideas.keboola.com](https://ideas.keboola.com/)

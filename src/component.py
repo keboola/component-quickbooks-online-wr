@@ -16,10 +16,11 @@ from mapping import expected_columns, create_entries
 KEY_API_TOKEN = '#api_token'
 KEY_SANDBOX = 'sandbox'
 KEY_ENDPOINTS = 'endpoints'
+KEY_ACTION = 'action'
 KEY_COMPANY_ID = 'company_id'
 KEY_FAIL_ON_ERROR = 'fail_on_error'
 
-REQUIRED_PARAMETERS = [KEY_COMPANY_ID, KEY_ENDPOINTS]
+REQUIRED_PARAMETERS = [KEY_COMPANY_ID, KEY_ENDPOINTS, KEY_ACTION]
 
 supported_endpoints = ["journalentry"]
 
@@ -43,20 +44,18 @@ class Component(ComponentBase):
         oauth = self.configuration.oauth_credentials
         sandbox = self.configuration.parameters.get(KEY_SANDBOX, False)
         company_id = self.configuration.parameters.get(KEY_COMPANY_ID)
-        endpoints = self.configuration.parameters.get(KEY_ENDPOINTS, [])
+        endpoints = self.configuration.parameters.get(KEY_ENDPOINTS)
+        action = self.configuration.parameters.get(KEY_ACTION)
         fail_on_error = self.configuration.parameters.get(KEY_FAIL_ON_ERROR, False)
 
-        self.refresh_token = self.get_refresh_token(oauth)
+        old_refresh_token = self.get_refresh_token(oauth)
 
-        if not endpoints:
-            raise UserException("Endpoints parameter cannot be empty.")
-
-        client = QuickbooksClient(company_id, self.refresh_token, oauth, sandbox, fail_on_error)
-        self.process_oauth_tokens(client, sandbox)
+        client = QuickbooksClient(company_id, old_refresh_token, oauth, sandbox, fail_on_error)
+        self.refresh_and_save_quickbooks_token(client)
 
         tables_in_path = self.tables_in_path
-        for endpoint in endpoints:
 
+        for endpoint in endpoints:
             if endpoint not in supported_endpoints:
                 raise UserException(f"Unsupported endpoint: {endpoint}")
 
@@ -64,11 +63,11 @@ class Component(ComponentBase):
             in_table_path = os.path.join(tables_in_path, table_name)
 
             if not os.path.exists(in_table_path):
-                raise UserException(f"Input table for selected endpoint {endpoint} not found. Table's name should be "
-                                    f"{table_name}")
+                raise UserException(f"Input table for selected endpoint {endpoint} not found. "
+                                    f"Table's name should be {table_name}")
 
             try:
-                self.process_endpoint(client, in_table_path, endpoint, fail_on_error)
+                self.process_endpoint(client, in_table_path, endpoint, action, fail_on_error)
             except QuickbooksClientException as e:
                 raise UserException(f"Error processing endpoint {endpoint}: {e}")
 
@@ -81,95 +80,104 @@ class Component(ComponentBase):
                  "#refresh_token": client.refresh_token}
         })
 
-    def process_endpoint(self, client, csv_path: str, endpoint, fail_on_error: bool):
+    def process_endpoint(self, client, csv_path: str, endpoint: str, action: str, fail_on_error: bool):
         logging.info(f"Processing endpoint: {endpoint}")
 
-        self.check_columns(endpoint, csv_path)
-        group_ids = self.get_unique_group_ids(csv_path)
+        self.check_columns(endpoint, action, csv_path)
+        batches = self.get_batches(csv_path)
 
         if fail_on_error:
-            self.process_with_failure(client, csv_path, endpoint, group_ids)
+            self.process_with_failure(client, csv_path, endpoint, action, batches)
         else:
-            self.process_with_logging(client, csv_path, endpoint, group_ids)
+            self.process_with_logging(client, csv_path, endpoint, action, batches)
 
-    def process_with_failure(self, client, csv_path, endpoint, group_ids):
-        for group_id in group_ids:
-            data = self.read_group_data(csv_path, group_id)
-            entries = create_entries(endpoint, data)
+    def process_with_failure(self, client, csv_path, endpoint, action, batches):
+        for batch in batches:
+            data = self.get_batch(csv_path, batch)
+            entries = create_entries(endpoint, action, data)
             response = client.send(endpoint, entries)
 
             if 'Fault' in response:
-                raise UserException(f"Error processing row with Id {data[0]['Id']}: {response['Fault']}")
+                raise UserException(f"Error processing endpoint {endpoint}, action {action}, with data {data}:"
+                                    f" {response['Fault']}")
 
-    def process_with_logging(self, client, csv_path, endpoint, group_ids):
-        self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME, primary_key=["id", "endpoint"],
+    def process_with_logging(self, client, csv_path, endpoint, action, batches):
+        self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME,
+                                                             primary_key=["Id", "endpoint", "action"],
                                                              incremental=True, write_always=True)
         with open(self.errors_table.full_path, 'w') as ef:
-            writer = csv.DictWriter(ef, fieldnames=["id", "endpoint", "error"])
+            writer = csv.DictWriter(ef, fieldnames=["Id", "endpoint", "action", "error"])
             writer.writeheader()
 
-            for group_id in group_ids:
-                data = self.read_group_data(csv_path, group_id)
-                entries = create_entries(endpoint, data)
+            for batch in batches:
+                data = self.get_batch(csv_path, batch)
+                entries = create_entries(endpoint, action, data)
                 response = client.send(endpoint, entries)
 
                 if response:
                     error_to_write = {
-                        "id": data[0]['Id'],
+                        "Id": data[0]['Id'], # noqa
                         "endpoint": endpoint,
-                        "error": str(response['Fault'])
+                        "action": action,
+                        "error": str(response.get('Fault'))
                     }
                     logging.warning(error_to_write)
                     writer.writerow(error_to_write)
 
     @staticmethod
-    def read_group_data(csv_path, group_id):
-        data = []
-        with open(csv_path, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if row['GroupId'] == group_id:  # noqa
-                    data.append(row)
-        return data
+    def check_columns(endpoint: str, action: str, csv_path: str) -> None:
+        try:
+            expected_columns[endpoint][action]
+        except KeyError:
+            raise UserException(f"Unsupported action for endpoint {endpoint}: {action}")
 
-    @staticmethod
-    def check_columns(endpoint, csv_path):
         with open(csv_path, 'r') as f:
             reader = csv.DictReader(f)
             csv_columns = reader.fieldnames
-            missing_columns = [col for col in expected_columns[endpoint] if col not in csv_columns]
+
+            missing_columns = [col for col in expected_columns[endpoint][action] if col not in csv_columns]
             if missing_columns:
                 raise UserException(f"Missing columns in input table for endpoint {endpoint}: {missing_columns}")
 
     @staticmethod
-    def get_unique_group_ids(csv_path: str) -> set:
-        """
-        Extracts unique GroupId values from a CSV reader.
+    def get_batches(csv_file_path: str) -> list:
+        unique_combinations = set()
 
-        Parameters:
-        reader (str): Path to csv file.
+        with open(csv_file_path, mode='r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
 
-        Returns:
-        set: A set of unique GroupId values.
-        """
-        with open(csv_path, 'r') as f:
-            reader = csv.DictReader(f)
-            group_ids = set()
             for row in reader:
-                group_ids.add(row['GroupId']) # noqa
-            return group_ids
+                id_value = str(row['Id']) # noqa
+                entity_name_value = str(row['EntityName']) # noqa
+                unique_combinations.add((id_value, entity_name_value))
 
-    def process_oauth_tokens(self, client: QuickbooksClient, sandbox: bool) -> None:
-        """Uses Quickbooks client to get new tokens and saves them using API if they have changed since the last run."""
-        new_refresh_token = client.refresh_access_token()
-        if self.refresh_token != new_refresh_token:
+        return list(unique_combinations)
 
-            if not sandbox:
-                self.save_new_oauth_token(new_refresh_token)
+    @staticmethod
+    def get_batch(csv_file_path: str, unique_combination: list[tuple[str, str]]) -> list[str]:
+        batch = []
 
-            self.refresh_token = new_refresh_token
+        with open(csv_file_path, mode='r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
 
-    def get_refresh_token(self, oauth):
+            for row in reader:
+                id_value = str(row['Id']) # noqa
+                entity_name_value = str(row['EntityName']) # noqa
+
+                if (id_value, entity_name_value) == unique_combination:
+                    batch.append(row)
+        return batch
+
+    def refresh_and_save_quickbooks_token(self, client: QuickbooksClient):
+        """Uses Quickbooks client to get new tokens and saves them using API."""
+        client.refresh_access_token()
+
+        if self.environment_variables.token:
+            self.save_new_oauth_token(client.refresh_token)
+        else:
+            logging.warning("No storage token found. Skipping token save at the beginning of the run.")
+
+    def get_refresh_token(self, oauth) -> str:
 
         try:
             refresh_token = oauth["data"]["refresh_token"]
@@ -192,7 +200,7 @@ class Component(ComponentBase):
         return refresh_token
 
     def save_new_oauth_token(self, refresh_token: str) -> None:
-        logging.debug("Saving new token to state using Keboola API.")
+        logging.info("Saving new token to state using Keboola API.")
 
         try:
             encrypted_refresh_token = self.encrypt(refresh_token)
