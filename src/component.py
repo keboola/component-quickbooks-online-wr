@@ -38,6 +38,7 @@ class Component(ComponentBase):
         self.client: QuickbooksClient
         self.refresh_token = None
         self.errors_table = None
+        self.start_ts = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
     def run(self):
         self.validate_configuration_parameters(REQUIRED_PARAMETERS)
@@ -76,7 +77,7 @@ class Component(ComponentBase):
 
         self.write_state_file({
             "token":
-                {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                {"ts": self.start_ts,
                  "#refresh_token": client.refresh_token}
         })
 
@@ -106,10 +107,10 @@ class Component(ComponentBase):
 
     def process_with_logging(self, client, csv_path, endpoint, action, batches):
         self.errors_table = self.create_out_table_definition(self.ERRORS_TABLE_NAME,
-                                                             primary_key=["Id", "endpoint", "action"],
+                                                             primary_key=[],
                                                              incremental=True, write_always=True)
         with open(self.errors_table.full_path, 'w') as ef:
-            writer = csv.DictWriter(ef, fieldnames=["Id", "endpoint", "action", "error"])
+            writer = csv.DictWriter(ef, fieldnames=["id", "endpoint", "action", "body", "error", "ts"])
             writer.writeheader()
 
             for batch in batches:
@@ -119,10 +120,12 @@ class Component(ComponentBase):
 
                 if response:
                     error_to_write = {
-                        "Id": data[0]['Id'], # noqa
+                        "id": data[0]['Id'], # noqa
                         "endpoint": endpoint,
                         "action": action,
-                        "error": str(response.get('Fault'))
+                        "body": str(entries),
+                        "error": str(response.get('Fault')),
+                        "ts": self.start_ts
                     }
                     logging.warning(error_to_write)
                     writer.writerow(error_to_write)
@@ -214,7 +217,7 @@ class Component(ComponentBase):
         new_state = {
             "component": {
                 "token":
-                    {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                    {"ts": self.start_ts,
                      "#refresh_token": encrypted_refresh_token}
             }}
         self.update_config_state(region="CURRENT_STACK",
@@ -260,7 +263,7 @@ class Component(ComponentBase):
             logging.error(f"Unable to update component state using Keboola Storage API: {e}")
             self.write_state_file({
                 "token":
-                    {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                    {"ts": self.start_ts,
                      "#refresh_token": self.refresh_token}
             })
             exit(0)
