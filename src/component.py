@@ -217,7 +217,7 @@ class Component(ComponentBase):
         new_state = {
             "component": {
                 "token":
-                    {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                    {"ts": self.start_ts,
                      "#refresh_token": encrypted_refresh_token}
             }}
         self.update_config_state(region="CURRENT_STACK",
@@ -263,7 +263,7 @@ class Component(ComponentBase):
             logging.error(f"Unable to update component state using Keboola Storage API: {e}")
             self.write_state_file({
                 "token":
-                    {"ts": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                    {"ts": self.start_ts,
                      "#refresh_token": self.refresh_token}
             })
             exit(0)
