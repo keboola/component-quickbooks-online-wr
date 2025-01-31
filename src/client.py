@@ -4,6 +4,7 @@ from requests.exceptions import HTTPError
 from requests.auth import HTTPBasicAuth
 import requests.exceptions
 from keboola.http_client import HttpClient
+from xml.etree import ElementTree as ET
 
 
 class QuickbooksClientException(Exception):
@@ -59,6 +60,37 @@ class QuickbooksClient(HttpClient):
         self.refresh_token = results["refresh_token"]
         self.access_token_refreshed = True
 
+    def _parse_xml_response(self, xml_text: str) -> dict:
+        """Parse XML response from Quickbooks API.
+        
+        Args:
+            xml_text: XML response text
+            
+        Returns:
+            dict: Parsed error response in format {'Fault': {'Error': [...]}}
+            
+        Raises:
+            QuickbooksClientException: If XML doesn't contain expected error format
+        """
+        root = ET.fromstring(xml_text)
+        
+        namespace = 'http://schema.intuit.com/finance/v3'
+        errors = []
+        
+        for error in root.findall(f'.//{{{namespace}}}Error'):
+            error_info = {
+                'code': error.get('code', 'unknown'),
+                'element': error.get('element', 'unknown'),
+                'message': error.find(f'{{{namespace}}}Message').text,
+                'detail': error.find(f'{{{namespace}}}Detail').text
+            }
+            errors.append(error_info)
+        
+        if not errors:
+            raise QuickbooksClientException(f"Unexpected XML response format: {xml_text}")
+        
+        return {'Fault': {'Error': errors}}
+
     def _post(self, endpoint, data: dict):
         headers = {
             "Authorization": "Bearer " + self.access_token,
@@ -73,10 +105,19 @@ class QuickbooksClient(HttpClient):
             return False
         except requests.exceptions.HTTPError as e:
             if r.status_code == 401:
-                raise QuickbooksClientException("Unauthorized for Quickbooks API, please re-authorize credentials "
-                                                "and check you company_id.")
-            if self.fail_on_error:
-                raise QuickbooksClientException(f"Failed to post data to Quickbooks: {e}, received response: {r.text}")
-            return r.json()
-        except requests.exceptions.JSONDecodeError as e:
-            raise QuickbooksClientException(f"Failed to parse response from Quickbooks: {e}, received response: {r.text}") # noqa
+                raise QuickbooksClientException(
+                    "Unauthorized for Quickbooks API, please re-authorize credentials "
+                    "and check your company_id."
+                )
+            
+            # Handle error response
+            try:
+                if 'xml' in r.headers.get('Content-Type', '').lower():
+                    return self._parse_xml_response(r.text)
+                return r.json()
+            except (ET.ParseError, requests.exceptions.JSONDecodeError, QuickbooksClientException) as parse_error:
+                if self.fail_on_error:
+                    raise QuickbooksClientException(
+                        f"Failed to parse error response: {parse_error}, response: {r.text}"
+                    )
+                return {'Fault': {'Error': [{'message': r.text}]}}
