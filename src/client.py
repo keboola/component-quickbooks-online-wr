@@ -60,23 +60,21 @@ class QuickbooksClient(HttpClient):
         self.refresh_token = results["refresh_token"]
         self.access_token_refreshed = True
 
-    def _parse_xml_response(self, xml_text: str) -> dict:
+    @staticmethod
+    def _parse_xml_response(xml_text: str) -> dict:
         """Parse XML response from Quickbooks API.
-        
         Args:
             xml_text: XML response text
-            
         Returns:
             dict: Parsed error response in format {'Fault': {'Error': [...]}}
-            
         Raises:
             QuickbooksClientException: If XML doesn't contain expected error format
         """
         root = ET.fromstring(xml_text)
-        
+
         namespace = 'http://schema.intuit.com/finance/v3'
         errors = []
-        
+
         for error in root.findall(f'.//{{{namespace}}}Error'):
             error_info = {
                 'code': error.get('code', 'unknown'),
@@ -85,10 +83,10 @@ class QuickbooksClient(HttpClient):
                 'detail': error.find(f'{{{namespace}}}Detail').text
             }
             errors.append(error_info)
-        
+
         if not errors:
             raise QuickbooksClientException(f"Unexpected XML response format: {xml_text}")
-        
+
         return {'Fault': {'Error': errors}}
 
     def _post(self, endpoint, data: dict):
@@ -107,17 +105,19 @@ class QuickbooksClient(HttpClient):
             if r.status_code == 401:
                 raise QuickbooksClientException(
                     "Unauthorized for Quickbooks API, please re-authorize credentials "
-                    "and check your company_id."
-                )
-            
-            # Handle error response
-            try:
-                if 'xml' in r.headers.get('Content-Type', '').lower():
+                    "and check your company_id.")
+
+            if self.fail_on_error:
+                raise QuickbooksClientException(f"Failed to post data to Quickbooks: {e}, received response: {r.text}")
+
+            # if is validation error returned as XML, parse it
+            if 'xml' in r.headers.get('Content-Type', '').lower():
+                try:
                     return self._parse_xml_response(r.text)
-                return r.json()
-            except (ET.ParseError, requests.exceptions.JSONDecodeError, QuickbooksClientException) as parse_error:
-                if self.fail_on_error:
-                    raise QuickbooksClientException(
-                        f"Failed to parse error response: {parse_error}, response: {r.text}"
-                    )
-                return {'Fault': {'Error': [{'message': r.text}]}}
+                except (ET.ParseError, requests.exceptions.JSONDecodeError, QuickbooksClientException) as parse_error:
+                    if self.fail_on_error:
+                        raise QuickbooksClientException(
+                            f"Failed to parse error response: {parse_error}, response: {r.text}"
+                        )
+                    return {'Fault': {'Error': [{'message': r.text}]}}
+            return r.json()
