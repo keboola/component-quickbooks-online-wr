@@ -22,12 +22,9 @@ KEY_FAIL_ON_ERROR = 'fail_on_error'
 
 REQUIRED_PARAMETERS = [KEY_COMPANY_ID, KEY_ENDPOINTS, KEY_ACTION]
 
-supported_endpoints = ["journalentry"]
+URL_SUFFIX = os.environ.get("KBC_STACKID", "connection.keboola.com").replace("connection.", "")
 
-URL_SUFFIXES = {"US": ".keboola.com",
-                "EU": ".eu-central-1.keboola.com",
-                "AZURE-EU": ".north-europe.azure.keboola.com",
-                "CURRENT_STACK": os.environ.get('KBC_STACKID', 'connection.keboola.com').replace('connection', '')}
+supported_endpoints = ["journalentry"]
 
 
 class Component(ComponentBase):
@@ -192,8 +189,8 @@ class Component(ComponentBase):
 
         statefile = self.get_state_file()
         if statefile.get("token", {}).get("ts"):
-            ts_oauth = datetime.datetime.strptime(oauth["created"], "%Y-%m-%dT%H:%M:%S.%fZ")
-            ts_statefile = datetime.datetime.strptime(statefile["token"]["ts"], "%Y-%m-%dT%H:%M:%S.%fZ")
+            ts_oauth = datetime.datetime.fromisoformat(oauth["created"])
+            ts_statefile = datetime.datetime.fromisoformat(statefile["token"]["ts"])
 
             if ts_statefile > ts_oauth:
                 refresh_token = statefile["token"].get("#refresh_token")
@@ -220,15 +217,14 @@ class Component(ComponentBase):
                     {"ts": self.start_ts,
                      "#refresh_token": encrypted_refresh_token}
             }}
-        self.update_config_state(region="CURRENT_STACK",
-                                 component_id=self.environment_variables.component_id,
+        self.update_config_state(component_id=self.environment_variables.component_id,
                                  configurationId=self.environment_variables.config_id,
                                  state=new_state,
                                  branch_id=self.environment_variables.branch_id)
 
     @backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=5)
     def encrypt(self, token: str) -> str:
-        url = "https://encryption.keboola.com/encrypt"
+        url = f"https://encryption.{URL_SUFFIX}/encrypt"
         params = {
             "componentId": self.environment_variables.component_id,
             "projectId": self.environment_variables.project_id,
@@ -244,13 +240,15 @@ class Component(ComponentBase):
         return response.text
 
     @backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=5)
-    def update_config_state(self, region, component_id, configurationId, state, branch_id='default'):
+    def update_config_state(self, component_id, configurationId, state, branch_id='default'):
         if not branch_id:
             branch_id = 'default'
 
-        url = f'https://connection{URL_SUFFIXES[region]}/v2/storage/branch/{branch_id}' \
-              f'/components/{component_id}/configs/' \
-              f'{configurationId}/state'
+        url = (
+            f"https://connection.{URL_SUFFIX}/v2/storage/branch/{branch_id}"
+            f"/components/{component_id}/configs/"
+            f"{configurationId}/state"
+        )
 
         parameters = {'state': json.dumps(state)}
         headers = {'Content-Type': 'application/x-www-form-urlencoded', 'X-StorageApi-Token': self._get_storage_token()}
