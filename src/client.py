@@ -77,4 +77,9 @@ class QuickbooksClient(HttpClient):
                                                 "and check you company_id.")
             if self.fail_on_error:
                 raise QuickbooksClientException(f"Failed to post data to Quickbooks: {e}, received response: {r.text}")
-            return r.json()
+
+            try:
+                return r.json()
+            except requests.exceptions.JSONDecodeError:
+                logging.warning(f"Failed to parse JSON response for HTTP {r.status_code}: {r.text or 'Empty response'}")
+                return None
