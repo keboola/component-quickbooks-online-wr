@@ -1,1 +1,1 @@
-Quickbooks Online Writer
+Writes journal entries to QuickBooks Online.
